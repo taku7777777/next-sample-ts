@@ -2,16 +2,41 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 
 const DELTA_T = 50;
 
+type DrawableUnit = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  imageKey: string;
+};
+
 export default function Home() {
   const canvasRef1 = useRef<HTMLCanvasElement>(null);
   const canvasRef2 = useRef<HTMLCanvasElement>(null);
+
+  // Time Management
   const [basisDateTime] = useState(new Date().valueOf());
   const [count, setCount] = useState(basisDateTime);
   const [latestCount, setLatestCount] = useState(basisDateTime);
 
-  const [image1, setImage1] = useState<CanvasImageSource | null>(null);
+  // ImageLIst
+  const [images, setImages] = useState<{[key: string]: CanvasImageSource | undefined}>({});
 
+  // KeyState
   const [keyState, setKeyState] = useState<{[keyCode: string]: boolean | undefined}>({});
+
+  // 状態の管理
+  const [drawableUnits, setDrawableUnits] = useState<DrawableUnit[]>([
+    {
+      x: 0,
+      y: 0,
+      h: 20,
+      w: 30,
+      imageKey: 'vercel',
+    },
+  ]);
+
+  const [position, setPosition] = useState<{x: number; y: number}>({x: 200, y: 100});
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -36,14 +61,10 @@ export default function Home() {
   useEffect(() => {
     const image1 = new Image();
     image1.src = '/vercel.svg';
-    setImage1(image1);
+    setImages(() => ({
+      ['vercel']: image1,
+    }));
   }, []);
-
-  // 状態の管理
-  const [position, setPosition] = useState<{x: number; y: number}>({
-    x: 0,
-    y: 0,
-  });
 
   // 一定間隔ごとに処理する
   useEffect(() => {
@@ -81,9 +102,16 @@ export default function Home() {
       return 0;
     };
 
-    setPosition(current => {
-      return {x: current.x + diffX(leftPressed, rightPressed), y: current.y + diffY(upPressed, downPressed)};
+    const nextPosition = {
+      x: position.x + diffX(leftPressed, rightPressed),
+      y: position.y + diffY(upPressed, downPressed),
+    };
+
+    setPosition({
+      x: nextPosition.x,
+      y: nextPosition.y,
     });
+    setDrawableUnits([{x: nextPosition.x, y: nextPosition.y, h: 20, w: 30, imageKey: 'vercel'}]);
   }, [count, basisDateTime, position, setLatestCount, latestCount, keyState]);
 
   // 一定間隔ごとに描画する
@@ -101,22 +129,30 @@ export default function Home() {
     const canvas2 = canvasRef2.current;
     const ctx1 = canvas1.getContext('2d');
     const ctx2 = canvas2.getContext('2d');
-    if (!ctx1 || !ctx2 || !image1) {
+    // const image1 = images[0];
+    if (!ctx1 || !ctx2) {
       // throw new Error("context取得失敗");
       return;
     }
 
-    // console.log('rendering', new Date().valueOf() - basisDateTime, basisDateTime, keyState);
+    console.log('drawableUnits', drawableUnits);
 
     ctx1.clearRect(0, 0, 1200, 900);
-    ctx1.drawImage(image1, position.x, position.y, 25, 25);
+    drawableUnits.map(unit => {
+      const image = images[unit.imageKey];
+      if (!image) {
+        console.warn('there is no error', unit.imageKey, images);
+        return;
+      }
+      ctx1.drawImage(image, unit.x, unit.y, unit.w, unit.h);
+    });
     const dat = ctx1.getImageData(0, 0, 1200, 900);
     ctx2.putImageData(dat, 0, 0);
 
     // 黒い長方形を描画する
     // ctx.fillStyle = '#000000';
     // ctx.fillRect(position.x, position.y, ctx.canvas.width / 2, ctx.canvas.height / 2);
-  }, [count, basisDateTime, position, setLatestCount, latestCount, image1, keyState]);
+  }, [count, basisDateTime, position, setLatestCount, latestCount, images, keyState, drawableUnits]);
 
   return (
     <div>
