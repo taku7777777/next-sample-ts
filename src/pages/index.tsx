@@ -1,27 +1,11 @@
+import {Character} from '@/domain/model/character';
+import {PhysicalObject} from '@/domain/model/physicalObject';
 import {KeyState} from '@/shared/keyState';
 import {KeyType} from '@/shared/keyType';
 import {ObjectUtils} from '@/shared/objectUtils';
-import {useCallback, useEffect, useRef, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 
-const DELTA_T = 50;
-
-type DrawableUnit = {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  imageKey: string;
-};
-
-type Character = {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  ax: number;
-  ay: number;
-  key: 'mainCharacter';
-};
+const DELTA_T = 25;
 
 // 監視する必要のあるすべてのキーの状態
 type AllKeyState = {
@@ -36,6 +20,7 @@ export default function Home() {
   const [startTime] = useState(new Date().valueOf());
   const [latestIntervalTime, setLatestIntervalTime] = useState(startTime);
   const [latestCalcTime, setLatestCalcTime] = useState(startTime);
+  const [latestDrawTime, setLatestDrawTime] = useState(startTime);
 
   // Image List(画像のインスタンスを事前に生成しておき使い回す)
   const [images, setImages] = useState<{[key: string]: CanvasImageSource | undefined}>({});
@@ -45,20 +30,8 @@ export default function Home() {
     ObjectUtils.fromEntries(KeyType.values().map(key => [key, KeyState.notPressed]))
   );
 
-  // 状態の管理
-  const [drawableUnits, setDrawableUnits] = useState<DrawableUnit[]>([
-    {
-      x: 0,
-      y: 0,
-      h: 20,
-      w: 30,
-      imageKey: 'mainCharacter',
-    },
-  ]);
-
+  // 物理世界の状態
   const [mainCharacter, setMainCharacter] = useState<Character | undefined>(undefined);
-
-  const [position, setPosition] = useState<{x: number; y: number}>({x: 200, y: 100});
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -68,13 +41,21 @@ export default function Home() {
     return () => clearInterval(interval);
   }, []);
 
+  // initialize
   useEffect(() => {
-    // initialize
-    setMainCharacter({x: 200, y: 200, vx: 0, vy: 0, ax: 0, ay: 0, key: 'mainCharacter'});
+    setMainCharacter({
+      position: {x: 20, y: 20},
+      velocity: {x: 0, y: 0},
+      maxVelocity: {x: 5, y: 5},
+      acceleration: {x: 0, y: 0},
+      dimensions: {width: 35, height: 25},
+      key: 'mainCharacter',
+    });
   }, []);
 
-  const updateKeyState = useCallback(
-    (state: KeyState) => (event: any) => {
+  // initialize
+  useEffect(() => {
+    const updateKeyState = (state: KeyState) => (event: any) => {
       try {
         const keyEventIndex = Number(event.keyCode);
         const keyType = KeyType.fromKeyEventIndex(keyEventIndex);
@@ -86,15 +67,12 @@ export default function Home() {
       } catch (_) {
         return;
       }
-    },
-    []
-  );
-
-  useEffect(() => {
+    };
     document.addEventListener('keydown', updateKeyState(KeyState.pressed), false);
     document.addEventListener('keyup', updateKeyState(KeyState.notPressed), false);
-  }, [updateKeyState]);
+  }, []);
 
+  // initialize
   useEffect(() => {
     const image1 = new Image();
     image1.src = '/vercel.svg';
@@ -114,46 +92,27 @@ export default function Home() {
     const delta = latestIntervalTime - latestCalcTime;
     setLatestCalcTime(latestIntervalTime);
 
-    // 物理世界の反映
-
-    const diffX = (keyState: AllKeyState): number => {
-      if (keyState.left === KeyState.pressed && keyState.right !== KeyState.pressed) {
-        return -delta * 0.05;
-      } else if (keyState.left !== KeyState.pressed && keyState.right === KeyState.pressed) {
-        return delta * 0.05;
-      } else {
-        return 0;
-      }
-    };
-
-    const diffY = (keyState: AllKeyState): number => {
-      if (keyState.up === KeyState.pressed && keyState.down !== KeyState.pressed) {
-        return -delta * 0.05;
-      } else if (keyState.up !== KeyState.pressed && keyState.down === KeyState.pressed) {
-        return delta * 0.05;
-      } else {
-        return 0;
-      }
-    };
-
-    const nextPosition = {
-      x: position.x + diffX(keyState),
-      y: position.y + diffY(keyState),
-    };
-
-    setPosition({
-      x: nextPosition.x,
-      y: nextPosition.y,
-    });
-    setDrawableUnits([{x: nextPosition.x, y: nextPosition.y, h: 20, w: 30, imageKey: 'mainCharacter'}]);
-  }, [latestIntervalTime, startTime, position, setLatestCalcTime, latestCalcTime, keyState, mainCharacter]);
+    // Characterの状態を次の状態に移行します
+    setMainCharacter(
+      current =>
+        current &&
+        PhysicalObject.reflectVelocity(
+          PhysicalObject.reflectAcceleration(
+            PhysicalObject.addAcceleration(PhysicalObject.initializeAcceleration(current))(
+              Character.covertUserInputToAcceleration(current)(keyState)
+            )
+          )(delta)
+        )(delta)
+    );
+  }, [latestIntervalTime, startTime, setLatestCalcTime, latestCalcTime, keyState, mainCharacter]);
 
   // 一定間隔ごとに描画する
   useEffect(() => {
-    if (latestIntervalTime <= latestCalcTime) {
+    if (latestCalcTime <= latestDrawTime) {
       return;
     }
-    setLatestCalcTime(latestIntervalTime);
+    setLatestDrawTime(latestIntervalTime);
+
     if (!canvasRef1.current || !canvasRef2.current) {
       // throw new Error("objectがnull");
       return;
@@ -169,7 +128,21 @@ export default function Home() {
       return;
     }
 
-    console.log('drawableUnits', drawableUnits);
+    console.log('mainCharacter', mainCharacter);
+
+    const drawableUnits = [
+      ...(mainCharacter
+        ? [
+            {
+              x: mainCharacter.position.x,
+              y: mainCharacter.position.y,
+              w: mainCharacter.dimensions.width,
+              h: mainCharacter.dimensions.height,
+              imageKey: mainCharacter.key,
+            },
+          ]
+        : []),
+    ];
 
     ctx1.clearRect(0, 0, 1200, 900);
     drawableUnits.map(unit => {
@@ -178,15 +151,20 @@ export default function Home() {
         console.warn('there is no error', unit.imageKey, images);
         return;
       }
-      ctx1.drawImage(image, unit.x, unit.y, unit.w, unit.h);
+      ctx1.drawImage(image, unit.x - unit.w / 2, unit.y - unit.h / 2, unit.w, unit.h);
     });
     const dat = ctx1.getImageData(0, 0, 1200, 900);
     ctx2.putImageData(dat, 0, 0);
-
-    // 黒い長方形を描画する
-    // ctx.fillStyle = '#000000';
-    // ctx.fillRect(position.x, position.y, ctx.canvas.width / 2, ctx.canvas.height / 2);
-  }, [latestIntervalTime, startTime, position, setLatestCalcTime, latestCalcTime, images, keyState, drawableUnits]);
+  }, [
+    latestIntervalTime,
+    startTime,
+    setLatestCalcTime,
+    latestCalcTime,
+    images,
+    keyState,
+    latestDrawTime,
+    mainCharacter,
+  ]);
 
   return (
     <div>
