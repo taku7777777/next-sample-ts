@@ -4,9 +4,9 @@ import {KeyState} from '@/shared/keyState';
 import {KeyType} from '@/shared/keyType';
 import {ObjectUtils} from '@/shared/objectUtils';
 import {useEffect, useRef} from 'react';
-import {useTimeManager} from './useTimeManager';
-import {useKeyManager} from './useKeyManager';
-import {useImageManager} from './useImageManager';
+import {useTimeManager} from '../hooks/useTimeManager';
+import {useKeyManager} from '../hooks/useKeyManager';
+import {useImageManager} from '../hooks/useImageManager';
 import {GravityAffectedObject} from '@/domain/model/gravityAffectedObject';
 
 // 監視する必要のあるすべてのキーの状態
