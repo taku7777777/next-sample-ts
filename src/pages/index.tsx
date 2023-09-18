@@ -3,9 +3,11 @@ import {PhysicalObject} from '@/domain/model/physicalObject';
 import {KeyState} from '@/shared/keyState';
 import {KeyType} from '@/shared/keyType';
 import {ObjectUtils} from '@/shared/objectUtils';
-import {useCallback, useEffect, useRef, useState} from 'react';
-
-const DELTA_T = 25;
+import {useEffect, useRef} from 'react';
+import {useTimeManager} from './useTimeManager';
+import {useKeyManager} from './useKeyManager';
+import {useImageManager} from './useImageManager';
+import {GravityAffectedObject} from '@/domain/model/gravityAffectedObject';
 
 // 監視する必要のあるすべてのキーの状態
 type AllKeyState = {
@@ -22,51 +24,31 @@ export default function Home() {
   const canvasRef2 = useRef<HTMLCanvasElement>(null);
 
   // 状態の管理、初期値はわからないためundefinedも許容する
-  const allState = useRef<AllState | undefined>(undefined);
+  const physicalState = useRef<AllState | undefined>(undefined);
 
-  // Time Management
-  const [startTime] = useState(new Date().valueOf());
-  // 指定のインターバルで処理が発火された日時
-  const [latestIntervalTime, setLatestIntervalTime] = useState(startTime);
-  // 次の状態の算定が完了した最終日時
-  const [latestCalcTime, setLatestCalcTime] = useState(startTime);
-  // 画面描画が更新された最終日時
-  const [latestDrawTime, setLatestDrawTime] = useState(startTime);
-
-  // Image List(画像のインスタンスを事前に生成しておき使い回す)
-  const images = useRef<{[key: string]: CanvasImageSource | undefined}>({});
-  const pushImages = useCallback((key: string, image: CanvasImageSource) => {
-    images.current = {...images.current, [key]: image};
-  }, []);
+  // レンダリングや処理の再実行をコントロールするためのhooks
+  const {triggeredLatest, calculatedLatest, setCalculatedLatest, drawnLatest, setDrawnLatest} = useTimeManager();
 
   // Key State
   const initialKeyState = ObjectUtils.fromEntries(KeyType.values().map(keyType => [keyType, KeyState.notPressed]));
-  const _keyState = useRef<AllKeyState>(initialKeyState);
-  const updateKeyState = useCallback((keyType: KeyType, keyState: KeyState) => {
-    _keyState.current = {..._keyState.current, [keyType]: keyState};
-  }, []);
+  const keyState = useRef<AllKeyState>(initialKeyState);
+  useKeyManager(keyState);
 
-  // 物理世界の状態
-  const [mainCharacter, setMainCharacter] = useState<Character | undefined>(undefined);
-  const [blocks, setBlocks] = useState<PhysicalObject[]>([]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setLatestIntervalTime(new Date().valueOf());
-    }, DELTA_T);
-    return () => clearInterval(interval);
-  }, []);
+  // Image List(画像のインスタンスを事前に生成しておき使い回す)
+  const images = useRef<{[key: string]: CanvasImageSource | undefined}>({});
+  useImageManager(images);
 
   // initialize
   useEffect(() => {
-    allState.current = {
+    physicalState.current = {
       character: {
         position: {x: 20, y: 120},
         velocity: {x: 0, y: 0},
-        maxVelocity: {x: 5, y: 5},
+        maxVelocity: {x: 0.25, y: 0.5},
         acceleration: {x: 0, y: 0},
         dimensions: {width: 80, height: 40},
         key: 'mainCharacter',
+        isLanding: false,
       },
       blocks: [
         {
@@ -74,80 +56,62 @@ export default function Home() {
           velocity: {x: 0, y: 0},
           maxVelocity: {x: 0, y: 0},
           acceleration: {x: 0, y: 0},
-          dimensions: {width: 300, height: 100},
+          dimensions: {width: 3000, height: 100},
         },
       ],
     };
   }, []);
 
-  // initialize
-  useEffect(() => {
-    const _updateKeyState = (keyState: KeyState) => (event: any) => {
-      try {
-        const keyEventIndex = Number(event.keyCode);
-        const keyType = KeyType.fromKeyEventIndex(keyEventIndex);
-        if (!keyType) {
-          return;
-        }
-        updateKeyState(keyType, keyState);
-      } catch (_) {
-        return;
-      }
-    };
-    document.addEventListener('keydown', _updateKeyState(KeyState.pressed), false);
-    document.addEventListener('keyup', _updateKeyState(KeyState.notPressed), false);
-  }, [updateKeyState]);
-
-  // initialize
-  useEffect(() => {
-    const image1 = new Image();
-    image1.src = '/vercel.svg';
-    const image2 = new Image();
-    image2.src = '/block.png';
-    pushImages('mainCharacter', image1);
-    pushImages('block', image2);
-  }, [pushImages]);
-
   // 一定間隔ごとに処理する
   useEffect(() => {
-    if (latestIntervalTime <= latestCalcTime) {
+    if (triggeredLatest <= calculatedLatest) {
       // すでに次の情報を算定済みのため処理不要
       return;
     }
-    if (!allState.current) {
+    if (!physicalState.current) {
       // 初期化されていないため処理不要
       return;
     }
 
-    setLatestCalcTime(latestIntervalTime);
-    const delta = latestIntervalTime - latestCalcTime;
-    const currentCharacter = allState.current.character;
-    const currentBlocks = allState.current.blocks;
+    setCalculatedLatest(triggeredLatest);
 
-    const nextCharacter = currentBlocks.reduce<Character>(
-      (cur, block) => PhysicalObject.isBlockedBy(currentCharacter)(cur)(block),
-      PhysicalObject.reflectVelocity(
-        PhysicalObject.reflectAcceleration(
-          PhysicalObject.addAcceleration(PhysicalObject.initializeAcceleration(currentCharacter))(
-            Character.covertUserInputToAcceleration(currentCharacter)(_keyState.current)
-          )
+    const delta = triggeredLatest - calculatedLatest;
+    const currentCharacter = physicalState.current.character;
+    const currentBlocks = physicalState.current.blocks;
+
+    const nextCharacter = GravityAffectedObject.reflectIsLanding(
+      currentBlocks.reduce<Character>(
+        (cur, block) => PhysicalObject.isBlockedBy(currentCharacter)(cur)(block),
+        PhysicalObject.reflectVelocity(
+          PhysicalObject.reflectAcceleration(
+            // ユーザーの入力に応じて加速度を追加
+            GravityAffectedObject.addGravityIfNotLanding(
+              PhysicalObject.addAcceleration(PhysicalObject.initializeAcceleration(currentCharacter))(
+                Character.covertUserInputToAcceleration(currentCharacter)(keyState.current)
+              )
+            )
+          )(delta)
         )(delta)
-      )(delta)
-    );
-    allState.current = {
-      ...allState.current,
+      )
+    )(currentBlocks);
+    physicalState.current = {
+      ...physicalState.current,
       character: nextCharacter,
     };
-  }, [latestIntervalTime, latestCalcTime]);
+
+    if (nextCharacter.velocity.x > 0.25) {
+      console.log('is over velocity x', nextCharacter.velocity.x);
+    }
+  }, [triggeredLatest, calculatedLatest, setCalculatedLatest]);
 
   // 一定間隔ごとに描画する
   useEffect(() => {
-    if (latestCalcTime <= latestDrawTime) {
+    if (calculatedLatest <= drawnLatest) {
       return;
     }
-    setLatestDrawTime(latestCalcTime);
+    setDrawnLatest(calculatedLatest);
 
-    if (!canvasRef1.current || !canvasRef2.current || !allState.current) {
+    if (!canvasRef1.current || !canvasRef2.current || !physicalState.current) {
       // throw new Error("objectがnull");
       return;
     }
@@ -162,8 +126,8 @@ export default function Home() {
       return;
     }
 
-    const character = allState.current.character;
-    const blocks = allState.current.blocks;
+    const character = physicalState.current.character;
+    const blocks = physicalState.current.blocks;
 
     const drawableUnits = [
       ...(character
@@ -193,11 +157,11 @@ export default function Home() {
         console.warn('there is no error', unit.imageKey, images);
         return;
       }
-      ctx1.drawImage(image, unit.x - unit.w / 2, unit.y - unit.h / 2, unit.w, unit.h);
+      ctx1.drawImage(image, unit.x - unit.w / 2 + 100, 800 - (unit.y + unit.h / 2), unit.w, unit.h);
     });
     const dat = ctx1.getImageData(0, 0, 1200, 900);
     ctx2.putImageData(dat, 0, 0);
-  }, [latestCalcTime, latestDrawTime]);
+  }, [calculatedLatest, drawnLatest, setDrawnLatest]);
 
   return (
     <div>

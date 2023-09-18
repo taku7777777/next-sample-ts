@@ -79,18 +79,6 @@ export const PhysicalObject = {
           return true;
         };
 
-      if (current.position.y >= 120 && next.position.y < 120) {
-        console.log(
-          'check isBlockedBy',
-          current,
-          next,
-          other,
-          current.position.y - current.dimensions.height / 2,
-          next.position.y - next.dimensions.height / 2,
-          blockY2
-        );
-      }
-
       if (
         (current.velocity.y > 0 || next.velocity.y > 0) &&
         current.position.y + current.dimensions.height / 2 <= blockY1 &&
@@ -105,7 +93,7 @@ export const PhysicalObject = {
         return {
           ...next,
           position: {...next.position, y: blockY1 - next.dimensions.height / 2},
-          velocity: {...next.velocity, y: -next.velocity.y / 2},
+          velocity: {...next.velocity, y: -next.velocity.y / 8},
           acceleration: {...next.acceleration, y: 0},
         };
       }
@@ -123,14 +111,14 @@ export const PhysicalObject = {
         return {
           ...next,
           position: {...next.position, y: blockY2 + next.dimensions.height / 2},
-          velocity: {...next.velocity, y: -next.velocity.y / 4},
+          velocity: {...next.velocity, y: -next.velocity.y / 8},
           acceleration: {...next.acceleration, y: 0},
         };
       }
       if (
         (current.velocity.x > 0 || next.velocity.x > 0) &&
-        current.position.x + current.dimensions.width / 2 < blockX1 &&
-        blockX1 < next.position.x + next.dimensions.width / 2 &&
+        current.position.x + current.dimensions.width / 2 <= blockX1 &&
+        blockX1 <= next.position.x + next.dimensions.width / 2 &&
         (isOverlapping(blockY1)(blockY2)(current.position.y - current.dimensions.height / 2)(
           current.position.y + current.dimensions.height / 2
         ) ||
@@ -147,8 +135,8 @@ export const PhysicalObject = {
       }
       if (
         (current.velocity.x < 0 || next.velocity.x < 0) &&
-        next.position.x - next.dimensions.width / 2 < blockX2 &&
-        blockX2 < current.position.x - current.dimensions.width / 2 &&
+        next.position.x - next.dimensions.width / 2 <= blockX2 &&
+        blockX2 <= current.position.x - current.dimensions.width / 2 &&
         (isOverlapping(blockY1)(blockY2)(current.position.y - current.dimensions.height / 2)(
           current.position.y + current.dimensions.height / 2
         ) ||
@@ -165,5 +153,33 @@ export const PhysicalObject = {
       }
 
       return next;
+    },
+
+  isOverlapping:
+    (a: PhysicalObject) =>
+    (b: PhysicalObject): boolean => {
+      const ax1 = a.position.x - a.dimensions.width / 2;
+      const ax2 = a.position.x + a.dimensions.width / 2;
+      const ay1 = a.position.y - a.dimensions.height / 2;
+      const ay2 = a.position.y + a.dimensions.height / 2;
+      const bx1 = b.position.x - b.dimensions.width / 2;
+      const bx2 = b.position.x + b.dimensions.width / 2;
+      const by1 = b.position.y - b.dimensions.height / 2;
+      const by2 = b.position.y + b.dimensions.height / 2;
+
+      const isOverlapping =
+        (a1: number) =>
+        (a2: number) =>
+        (b1: number) =>
+        (b2: number): boolean => {
+          if (a2 < b1) {
+            return false;
+          }
+          if (b2 < a1) {
+            return false;
+          }
+          return true;
+        };
+      return isOverlapping(ax1)(ax2)(bx1)(bx2) && isOverlapping(ay1)(ay2)(by1)(by2);
     },
 };
